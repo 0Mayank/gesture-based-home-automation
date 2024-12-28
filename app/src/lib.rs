@@ -117,17 +117,21 @@ pub struct Models {
 }
 
 impl Models {
-    pub fn new() -> error_stack::Result<Self, GError> {
-        let hpe = HeadPoseEstimation::new(Process::HPE.connect()?);
-        let gesture = GestureDetection::new(Process::GestureRecognition.connect()?);
-        let head = HeadDetection::new(Process::HeadDetection.connect()?);
-        let cams = CameraProc::new(Process::Camera.connect()?);
+    pub fn new(config: &Config) -> error_stack::Result<Self, GError> {
+        let hpe = HeadPoseEstimation::new(Self::connect(&config.hpe_addr)?);
+        let gesture = GestureDetection::new(Self::connect(&config.gesture_detection_addr)?);
+        let head = HeadDetection::new(Self::connect(&config.head_detection_addr)?);
+        let cams = CameraProc::new(Self::connect(&config.picam_addr)?);
         Ok(Self {
             hpe,
             gesture,
             head,
             cams,
         })
+    }
+
+    pub fn connect(addr: impl AsRef<str>) -> error_stack::Result<UnixStream, GError> {
+        UnixStream::connect(addr.as_ref()).change_context(GError::ConnectionError)
     }
 }
 
@@ -138,6 +142,7 @@ pub struct ImageFrame {
     pub height: u32,
 }
 
+// NOTE: cook the Queue and Queueable trait and & shit
 pub struct App {
     pub config: Config,
     pub models: Models,
@@ -147,9 +152,9 @@ pub struct App {
 impl App {
     pub fn new(config: Config) -> error_stack::Result<App, GError> {
         Ok(App {
+            models: Models::new(&config)?,
+            pool: ThreadPool::new(config.pool_size),
             config,
-            models: Models::new()?,
-            pool: ThreadPool::new(4),
         })
     }
 
@@ -242,22 +247,23 @@ impl App {
             self.hpe(frame1.clone());
 
             // in the meantime calculate positition of head which had a gesture
-            let positions = gestures.iter().zip(head_positions.iter()).map(|(g, h)| {
-                if !g.is_none() {
-                    Some((
-                        math::calc_position(
-                            &self.config.camera1,
-                            &g.image_coords(frame1.width, frame1.height),
-                            &self.config.camera2,
-                            &h.image_coords(frame2.width, frame2.height),
-                        )
-                        .unwrap(),
-                        g.gesture.clone(),
-                    ))
-                } else {
-                    None
-                }
-            });
+            //let positions = gestures.iter().zip(head_positions.iter()).map(|(g, h)| {
+            //    if !g.is_none() {
+            //        todo!()
+            //        Some((
+            //            math::calc_position(
+            //                &self.config.camera1,
+            //                &g.image_coords(frame1.width, frame1.height),
+            //                &self.config.camera2,
+            //                &h.image_coords(frame2.width, frame2.height),
+            //            )
+            //            .unwrap(),
+            //            g.gesture.clone(),
+            //        ))
+            //    } else {
+            //        None
+            //    }
+            //});
 
             let head_poses = {
                 let mut hp = self.models.hpe.recv()?;
@@ -266,24 +272,24 @@ impl App {
             };
 
             // Now get the device in line of sight of each head
-            return Ok(Some(
-                head_poses
-                    .iter()
-                    .zip(positions)
-                    .filter_map(|(pose, position)| {
-                        let (position, gesture) = if let Some((position, gesture)) = position {
-                            (position, gesture)
-                        } else {
-                            return None;
-                        };
-
-                        let line_of_sight =
-                            math::get_los(&self.config.camera1, &position, &pose.quat());
-                        math::get_closest_device_in_los_alt(&self.config, line_of_sight)
-                            .map(|x| (x, gesture))
-                    })
-                    .collect(),
-            ));
+            //return Ok(Some(
+            //    head_poses
+            //        .iter()
+            //        .zip(positions)
+            //        .filter_map(|(pose, position)| {
+            //            let (position, gesture) = if let Some((position, gesture)) = position {
+            //                (position, gesture)
+            //            } else {
+            //                return None;
+            //            };
+            //
+            //            let line_of_sight =
+            //                math::get_los(&self.config.camera1, &position, &pose.quat());
+            //            math::get_closest_device_in_los_alt(&self.config, line_of_sight)
+            //                .map(|x| (x, gesture))
+            //        })
+            //        .collect(),
+            //));
         }
 
         Ok(None)

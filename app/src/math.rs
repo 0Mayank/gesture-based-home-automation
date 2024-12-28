@@ -2,8 +2,9 @@ use std::cmp::Ordering;
 
 use error_stack::{Result, ResultExt};
 use glam::{EulerRot, Quat, Vec3A};
-use nalgebra::linalg::SVD;
-use nalgebra::DMatrix; // nalgebra can be used for SVD
+use nalgebra::{self as na, stack};
+use nalgebra::{linalg::SVD, Matrix3x4};
+use nalgebra::{DMatrix, Vector3}; // nalgebra can be used for SVD
 use rust_3d::{IsNormalized3D, Line3D, Norm3D, Point3D};
 
 use crate::{
@@ -54,20 +55,20 @@ impl Line {
     }
 }
 
-pub fn calc_position(
-    camera1: &CameraProperties,
-    img_coords1: &ImageCoords,
-    camera2: &CameraProperties,
-    img_coords2: &ImageCoords,
-) -> Result<Vec3A, GError> {
-    let dir1 = calc_pos_dir_vec(camera1, img_coords1);
-    let dir2 = calc_pos_dir_vec(camera2, img_coords2);
-
-    let line1 = Line::new(camera1.pos(), &dir1);
-    let line2 = Line::new(camera2.pos(), &dir2);
-
-    line1.closest_point_bw(&line2)
-}
+//pub fn calc_position(
+//    camera1: &CameraProperties,
+//    img_coords1: &ImageCoords,
+//    camera2: &CameraProperties,
+//    img_coords2: &ImageCoords,
+//) -> Result<Vec3A, GError> {
+//    let dir1 = calc_pos_dir_vec(camera1, img_coords1);
+//    let dir2 = calc_pos_dir_vec(camera2, img_coords2);
+//
+//    let line1 = Line::new(camera1.pos(), &dir1);
+//    let line2 = Line::new(camera2.pos(), &dir2);
+//
+//    line1.closest_point_bw(&line2)
+//}
 
 pub fn triangulation(
     camera1: &CameraProperties,
@@ -85,31 +86,28 @@ pub fn triangulation(
     Ok(point_3d)
 }
 
-fn construct_projection_matrix(camera: &CameraProperties) -> [[f64; 4]; 3] {
+// TODO: cache or move to camera properties
+fn construct_projection_matrix(camera: &CameraProperties) -> Matrix3x4<f64> {
     // Intrinsic matrix
-    let k = camera.intrensic_prams;
+    //let k = na::Matrix3::from_row_slice(&camera.intrensic_params);
 
     // Rotation matrix
-    let r = camera.rotation_matrix;
+    //let r = na::Matrix3::from_row_slice(&camera.rotation_matrix);
 
     // Translation vector
-    let t = [
+    let t = Vector3::from_row_slice(&[
         camera.pos_x as f64,
         camera.pos_y as f64,
         camera.pos_z as f64,
-    ];
+    ]);
 
     // Concatenate the rotation matrix and translation vector to form the RT matrix
-    [
-        [r[0][0], r[0][1], r[0][2], t[0]],
-        [r[1][0], r[1][1], r[1][2], t[1]],
-        [r[2][0], r[2][1], r[2][2], t[2]],
-    ]
+    stack![camera.rotation_matrix, t]
 }
 
 fn dlt(
-    p1: &[[f64; 4]; 3],
-    p2: &[[f64; 4]; 3],
+    p1: &Matrix3x4<f64>,
+    p2: &Matrix3x4<f64>,
     point1: &ImageCoords,
     point2: &ImageCoords,
 ) -> Vec3A {
@@ -118,22 +116,22 @@ fn dlt(
         4,
         4,
         &[
-            point1.y as f64 * p1[2][0] - p1[1][0],
-            point1.y as f64 * p1[2][1] - p1[1][1],
-            point1.y as f64 * p1[2][2] - p1[1][2],
-            point1.y as f64 * p1[2][3] - p1[1][3],
-            p1[0][0] - point1.x as f64 * p1[2][0],
-            p1[0][1] - point1.x as f64 * p1[2][1],
-            p1[0][2] - point1.x as f64 * p1[2][2],
-            p1[0][3] - point1.x as f64 * p1[2][3],
-            point2.y as f64 * p2[2][0] - p2[1][0],
-            point2.y as f64 * p2[2][1] - p2[1][1],
-            point2.y as f64 * p2[2][2] - p2[1][2],
-            point2.y as f64 * p2[2][3] - p2[1][3],
-            p2[0][0] - point2.x as f64 * p2[2][0],
-            p2[0][1] - point2.x as f64 * p2[2][1],
-            p2[0][2] - point2.x as f64 * p2[2][2],
-            p2[0][3] - point2.x as f64 * p2[2][3],
+            point1.y as f64 * p1[(2, 0)] - p1[(1, 0)],
+            point1.y as f64 * p1[(2, 1)] - p1[(1, 1)],
+            point1.y as f64 * p1[(2, 2)] - p1[(1, 2)],
+            point1.y as f64 * p1[(2, 3)] - p1[(1, 3)],
+            p1[(0, 0)] - point1.x as f64 * p1[(2, 0)],
+            p1[(0, 1)] - point1.x as f64 * p1[(2, 1)],
+            p1[(0, 2)] - point1.x as f64 * p1[(2, 2)],
+            p1[(0, 3)] - point1.x as f64 * p1[(2, 3)],
+            point2.y as f64 * p2[(2, 0)] - p2[(1, 0)],
+            point2.y as f64 * p2[(2, 1)] - p2[(1, 1)],
+            point2.y as f64 * p2[(2, 2)] - p2[(1, 2)],
+            point2.y as f64 * p2[(2, 3)] - p2[(1, 3)],
+            p2[(0, 0)] - point2.x as f64 * p2[(2, 0)],
+            p2[(0, 1)] - point2.x as f64 * p2[(2, 1)],
+            p2[(0, 2)] - point2.x as f64 * p2[(2, 2)],
+            p2[(0, 3)] - point2.x as f64 * p2[(2, 3)],
         ],
     );
 
@@ -151,33 +149,33 @@ fn dlt(
     )
 }
 
-pub fn calc_pos_dir_vec(camera: &CameraProperties, coords: &ImageCoords) -> Vec3A {
-    let point_from_mid = coords.coords_from_mid();
-    let r_d = (
-        point_from_mid.0 / coords.x_mid(),
-        point_from_mid.1 / coords.y_mid(),
-    );
+//pub fn calc_pos_dir_vec(camera: &CameraProperties, coords: &ImageCoords) -> Vec3A {
+//    let point_from_mid = coords.coords_from_mid();
+//    let r_d = (
+//        point_from_mid.0 / coords.x_mid(),
+//        point_from_mid.1 / coords.y_mid(),
+//    );
+//
+//    let half_fov = (camera.fov_x / 2.0, camera.fov_y / 2.0);
+//
+//    let alpha = (
+//        (half_fov.0.tan() * r_d.0).atan(),
+//        (half_fov.1.tan() * r_d.1).atan(),
+//    );
+//
+//    let rotation = camera
+//        .quat()
+//        .mul_quat(Quat::from_euler(EulerRot::ZYX, alpha.0, alpha.1, 0.0));
+//
+//    rotation.mul_vec3a(BASE_FORWARD_VECTOR)
+//}
 
-    let half_fov = (camera.fov_x / 2.0, camera.fov_y / 2.0);
-
-    let alpha = (
-        (half_fov.0.tan() * r_d.0).atan(),
-        (half_fov.1.tan() * r_d.1).atan(),
-    );
-
-    let rotation = camera
-        .quat()
-        .mul_quat(Quat::from_euler(EulerRot::ZYX, alpha.0, alpha.1, 0.0));
-
-    rotation.mul_vec3a(BASE_FORWARD_VECTOR)
-}
-
-pub fn get_los(camera: &CameraProperties, pos: &Vec3A, quat_relative_to_cam: &Quat) -> Line {
-    // let dir = get_los_dir_1(camera, quat_relative_to_cam);
-    let dir = get_los_dir(camera, pos, quat_relative_to_cam);
-
-    Line::new(pos, &dir)
-}
+//pub fn get_los(camera: &CameraProperties, pos: &Vec3A, quat_relative_to_cam: &Quat) -> Line {
+//    // let dir = get_los_dir_1(camera, quat_relative_to_cam);
+//    let dir = get_los_dir(camera, pos, quat_relative_to_cam);
+//
+//    Line::new(pos, &dir)
+//}
 
 fn glamvec_to_norm3d(v: Vec3A) -> Result<Norm3D, error::GError> {
     Norm3D::new(Point3D::new(v.x.into(), v.y.into(), v.z.into()))
@@ -195,11 +193,11 @@ fn line3d_from(line: &Line) -> Result<Line3D, GError> {
     Ok(Line3D::new(anchor, dirn))
 }
 
-fn get_los_dir(camera: &CameraProperties, pos: &Vec3A, quat_relative_to_cam: &Quat) -> Vec3A {
-    let forward_vector = (*camera.pos() - *pos).normalize();
-    //dbg!(forward_vector);
-    quat_relative_to_cam.mul_vec3a(forward_vector)
-}
+//fn get_los_dir(camera: &CameraProperties, pos: &Vec3A, quat_relative_to_cam: &Quat) -> Vec3A {
+//    let forward_vector = (*camera.pos() - *pos).normalize();
+//    //dbg!(forward_vector);
+//    quat_relative_to_cam.mul_vec3a(forward_vector)
+//}
 
 pub fn get_closest_device_in_los(config: &Config, line: Line) -> Option<Device> {
     let aabbtree = config.aabbtree();
@@ -276,11 +274,11 @@ pub fn sort_horizontal<T: HasImagePosition>(v: &mut [T]) {
     })
 }
 
-pub fn angle_bw_cameras_from_z_axis(camera1: &CameraProperties, camera2: &CameraProperties) -> f32 {
-    let rvec = *camera1.pos() - *camera2.pos();
-
-    (rvec.z / rvec.length()).acos()
-}
+//pub fn angle_bw_cameras_from_z_axis(camera1: &CameraProperties, camera2: &CameraProperties) -> f32 {
+//    let rvec = *camera1.pos() - *camera2.pos();
+//
+//    (rvec.z / rvec.length()).acos()
+//}
 
 #[cfg(test)]
 mod tests {
@@ -313,9 +311,9 @@ mod tests {
         camera2.pos_y = 0.0;
         camera2.pos_z = 0.0;
 
-        assert_eq!(
-            std::f32::consts::FRAC_PI_4,
-            angle_bw_cameras_from_z_axis(&camera1, &camera2)
-        )
+        //assert_eq!(
+        //    std::f32::consts::FRAC_PI_4,
+        //    angle_bw_cameras_from_z_axis(&camera1, &camera2)
+        //)
     }
 }
